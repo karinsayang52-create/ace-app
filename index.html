@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>A.C.E.</title>
+<style>
+:root{--bg:#f6f6f4;--card:#fff;--tx:#1b1b1b;--mut:#6b6b6b;--bd:#e2e2de;--ac:#3b5bdb;--ok:#2b8a3e}
+@media(prefers-color-scheme:dark){:root{--bg:#141414;--card:#1e1e1e;--tx:#ececec;--mut:#9a9a9a;--bd:#2f2f2f;--ac:#7c9bff;--ok:#51cf66}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--tx);padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin:10px 0}
+textarea,input{width:100%;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px}
+textarea{min-height:90px;resize:vertical}
+button{font:inherit;background:var(--ac);color:#fff;border:0;border-radius:8px;padding:10px 16px;margin-top:8px;width:100%}
+button:disabled{opacity:.5}
+#roster{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:13px;border:1px solid var(--bd);border-radius:99px;padding:3px 10px;color:var(--mut)}
+.chip.on{border-color:var(--ac);color:var(--ac);animation:p 1s infinite alternate}
+@keyframes p{to{opacity:.45}}
+details{margin:8px 0}
+summary{cursor:pointer;font-weight:600}
+summary small{color:var(--mut);font-weight:400}
+pre{white-space:pre-wrap;word-break:break-word;font:14px/1.5 ui-monospace,monospace;margin:8px 0 0}
+.st{color:var(--mut);font-size:13px;margin:6px 0}
+.final{border-color:var(--ok)}
+.final h2{font-size:16px;margin:0 0 6px;color:var(--ok)}
+.err{color:#e03131}
+[hidden]{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>🏢 A.C.E. — Tim AI</h1>
+
+<section id="login" class="card" hidden>
+  <input id="code" type="password" placeholder="Kode akses tim" autocomplete="current-password">
+  <div id="lerr" class="st err"></div>
+  <button id="enter">Masuk</button>
+</section>
+
+<section id="app" hidden>
+  <div id="roster" class="card"></div>
+  <div class="card">
+    <textarea id="task" placeholder="Tugas untuk tim, mis. Buat skrip Python untuk merapikan file CSV"></textarea>
+    <button id="go">Kirim ke tim</button>
+  </div>
+  <div id="feed"></div>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const ROLES = {director:['🎯','Director'],coder:['💻','Coder'],creative:['🎨','Creative'],
+  analyst:['📊','Analyst'],auditor:['🔍','Auditor'],synthesizer:['📋','Synthesizer']};
+const chips = {};
+for (const [k,[e,n]] of Object.entries(ROLES)) {
+  const c = document.createElement('span'); c.className = 'chip'; c.textContent = e + ' ' + n;
+  $('roster').appendChild(c); chips[k] = c;
+}
+const getCode = () => { try { return sessionStorage.getItem('ace_code') || ''; } catch (e) { return ''; } };
+function show() { const ok = !!getCode(); $('login').hidden = ok; $('app').hidden = !ok; }
+$('enter').onclick = async () => {
+  const v = $('code').value.trim(); if (!v) return;
+  $('lerr').textContent = 'Memeriksa…';
+  try {
+    const r = await fetch('/api/check', {method: 'POST', headers: {'X-Access-Code': v}});
+    if (!r.ok) { $('lerr').textContent = r.status === 401 ? 'Kode salah. Salin ulang dari jendela IDLE Shell.' : 'Error ' + r.status; return; }
+  } catch (e) { $('lerr').textContent = 'Server tidak terjangkau. Apakah IDLE Shell masih terbuka?'; return; }
+  try { sessionStorage.setItem('ace_code', v); } catch (e) {}
+  $('lerr').textContent = ''; show();
+};
+function busy(role) { for (const k in chips) chips[k].classList.toggle('on', k === role); }
+function line(text, cls) { const d = document.createElement('div'); d.className = 'st ' + (cls||''); d.textContent = text; $('feed').appendChild(d); }
+function msg(ev) {
+  const [e,n] = ROLES[ev.role] || ['•', ev.role];
+  const d = document.createElement('details'); d.className = 'card';
+  const s = document.createElement('summary'); s.textContent = e + ' ' + n + ' ';
+  const sm = document.createElement('small'); sm.textContent = '(' + ev.provider + ')'; s.appendChild(sm);
+  const p = document.createElement('pre'); p.textContent = ev.text;
+  d.append(s, p); $('feed').appendChild(d);
+}
+function final(text) {
+  const d = document.createElement('div'); d.className = 'card final';
+  const h = document.createElement('h2'); h.textContent = '✅ Hasil akhir';
+  const p = document.createElement('pre'); p.textContent = text;
+  d.append(h, p); $('feed').appendChild(d); d.scrollIntoView({behavior:'smooth'});
+}
+function handle(ev) {
+  if (ev.type === 'working') { busy(ev.role); line((ROLES[ev.role]||[])[0] + ' ' + ev.role + ' sedang bekerja…'); }
+  else if (ev.type === 'message') msg(ev);
+  else if (ev.type === 'status') line(ev.text);
+  else if (ev.type === 'final') final(ev.text);
+  else if (ev.type === 'error') line('Error: ' + ev.text, 'err');
+}
+$('go').onclick = async () => {
+  const task = $('task').value.trim(); if (!task) return;
+  $('go').disabled = true; $('feed').textContent = ''; busy(null);
+  try {
+    const r = await fetch('/api/run', {method:'POST',
+      headers:{'Content-Type':'application/json','X-Access-Code':getCode()},
+      body: JSON.stringify({task})});
+    if (r.status === 401) { try { sessionStorage.removeItem('ace_code'); } catch (e) {}
+      $('lerr').textContent = 'Kode salah'; show(); return; }
+    if (!r.ok) { line('Error ' + r.status + (r.status === 429 ? ': server sibuk' : ''), 'err'); return; }
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const {done, value} = await rd.read(); if (done) break;
+      buf += dec.decode(value, {stream:true}); let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const ln = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (ln.startsWith('data: ')) handle(JSON.parse(ln.slice(6)));
+      }
+    }
+  } catch (e) { line('Koneksi terputus.', 'err'); }
+  finally { $('go').disabled = false; busy(null); }
+};
+show();
+</script>
+</body>
+</html>
